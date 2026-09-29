@@ -84,8 +84,8 @@ void Chip8::emulate_cycle(){
                     pc += 2;
                     break;
                 case 0x00EE: // Returns from subroutine
-                    pc = stack[sp];
                     sp--;
+                    pc = stack[sp];
                     pc += 2;
                     break;
                 default:
@@ -132,11 +132,11 @@ void Chip8::emulate_cycle(){
                     v[(opcode & 0x0F00) >> 8] |= v[(opcode & 0x00F0) >> 4];
                     pc += 2;
                     break;
-                case 0x0002: // v[x] = v[y] & v[y]
+                case 0x0002: // v[x] = v[x] & v[y]
                     v[(opcode & 0x0F00) >> 8] &= v[(opcode & 0x00F0) >> 4];
                     pc += 2;
                     break;
-                case 0x0003: // v[x] = v[y] ^ v[y]
+                case 0x0003: // v[x] = v[x] ^ v[y]
                     v[(opcode & 0x0F00) >> 8] ^= v[(opcode & 0x00F0) >> 4];
                     pc += 2;
                     break;
@@ -148,7 +148,7 @@ void Chip8::emulate_cycle(){
                 }
                     break;
                 case 0x0005: // v[x] -= v[y], v[F] = NOT(borrow)
-                    v[0xF] = (v[(opcode & 0x0F00) >> 8] > v[(opcode & 0x00F0) >> 4]) ? 1 : 0;
+                    v[0xF] = (v[(opcode & 0x0F00) >> 8] >= v[(opcode & 0x00F0) >> 4]) ? 1 : 0;
                     v[(opcode & 0x0F00) >> 8] -= v[(opcode & 0x00F0) >> 4];
                     pc += 2;
                     break;
@@ -158,7 +158,7 @@ void Chip8::emulate_cycle(){
                     pc += 2;
                     break;
                 case 0x0007: // v[x] = v[y] - v[x], v[F] = NOT(borrow)
-                    v[0xF] = (v[(opcode & 0x00F0) >> 4] > v[(opcode & 0x0F00) >> 8]) ? 1 : 0;
+                    v[0xF] = (v[(opcode & 0x00F0) >> 4] >= v[(opcode & 0x0F00) >> 8]) ? 1 : 0;
                     v[(opcode & 0x0F00) >> 8] = v[(opcode & 0x00F0) >> 4] - v[(opcode & 0x0F00) >> 8];
                     pc += 2;
                     break;
@@ -252,6 +252,8 @@ void Chip8::emulate_cycle(){
                             break;
                         }
                     }
+                    if(!key_pressed)
+                        return;
                     pc += 2;
                 }
                     break;
@@ -274,19 +276,19 @@ void Chip8::emulate_cycle(){
                 case 0x0033:{ // FX33 - store BCD representation of v[x] at index
                     uint8_t value = v[(opcode & 0x0F00) >> 8];
                     memory[index] = value/100;
-                    memory[index+1] = value/10;
+                    memory[index+1] = (value/10)%10;
                     memory[index+2] = value%10;
                     pc += 2;
                 }
                     break;
                 case 0x0055: // FX55 - store v[0] to v[x] in memory starting from index
-                    for(int i=0; i<((opcode & 0x0F00) >> 8); i++){
+                    for(int i=0; i<=((opcode & 0x0F00) >> 8); i++){
                         memory[index+i] = v[i];
                     }
                     pc += 2;
                     break;
                 case 0x0065: // FX65 - Fill v[0] to v[x] from memory starting at index
-                    for(int i=0; i<((opcode & 0x0F00) >> 8); i++){
+                    for(int i=0; i<=((opcode & 0x0F00) >> 8); i++){
                         v[i] = memory[index+i];
                     }
                     pc += 2;
@@ -301,10 +303,62 @@ void Chip8::emulate_cycle(){
             pc += 2;
             break;
     }
+    
+}
+
+void Chip8::tick_timers(){
     // We now update the timers
     if(delay_timer > 0) delay_timer--;
     if(sound_timer > 0){
         if(sound_timer == 1) std::cout << "BEEP!" << std::endl;
         sound_timer--;
     }
+}
+
+bool Chip8::save_state(const std::string& filename) {
+    std::ofstream file(filename, std::ios::binary);
+    if(!file.is_open()) {
+        std::cerr << "Failed to open save file for writing: " << filename << std::endl;
+        return false;
+    }
+    
+    //writing essential state data directly to file
+    file.write(reinterpret_cast<char*>(memory), sizeof(memory));
+    file.write(reinterpret_cast<char*>(v), sizeof(v));
+    file.write(reinterpret_cast<char*>(&index), sizeof(index));
+    file.write(reinterpret_cast<char*>(&pc), sizeof(pc));
+    file.write(reinterpret_cast<char*>(stack), sizeof(stack));
+    file.write(reinterpret_cast<char*>(&sp), sizeof(sp));
+    file.write(reinterpret_cast<char*>(&delay_timer), sizeof(delay_timer));
+    file.write(reinterpret_cast<char*>(&sound_timer), sizeof(sound_timer));
+    
+    file.close();
+    std::cout << "State saved successfully to " << filename <<std::endl;
+    return true;
+}
+
+bool Chip8::load_state(const std::string& filename) {
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open save file for reading: " << filename << std::endl;
+        return false;
+    }
+
+    // reading exact byte chunks back to our variables in exact same order
+    file.read(reinterpret_cast<char*>(memory), sizeof(memory));
+    file.read(reinterpret_cast<char*>(v), sizeof(v));
+    file.read(reinterpret_cast<char*>(&index), sizeof(index));
+    file.read(reinterpret_cast<char*>(&pc), sizeof(pc));
+    file.read(reinterpret_cast<char*>(stack), sizeof(stack));
+    file.read(reinterpret_cast<char*>(&sp), sizeof(sp));
+    file.read(reinterpret_cast<char*>(&delay_timer), sizeof(delay_timer));
+    file.read(reinterpret_cast<char*>(&sound_timer), sizeof(sound_timer));
+
+    file.close();
+    
+    // Force the screen to redraw immediately upon loading
+    draw_flag = true; 
+    
+    std::cout << "State loaded successfully from " << filename << std::endl;
+    return true;
 }
